@@ -1,0 +1,703 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>ACC Telemetry Dashboard</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<style>
+    * { box-sizing: border-box; }
+    body {
+        font-family: -apple-system, "Segoe UI", sans-serif;
+        background: #0a0a0c;
+        color: #e8e8ea;
+        margin: 0;
+        padding: 20px;
+    }
+    h1 { font-size: 19px; font-weight: 700; margin: 0 0 16px 0; letter-spacing: -0.2px; }
+
+    .controls {
+        display: flex;
+        gap: 14px;
+        align-items: center;
+        margin-bottom: 14px;
+        flex-wrap: wrap;
+        background: #17181c;
+        border: 1px solid rgba(255,255,255,0.06);
+        padding: 14px 18px;
+        border-radius: 16px;
+    }
+    label { font-size: 11px; color: #85868c; text-transform: uppercase; letter-spacing: 0.4px; }
+    select {
+        background: #202126;
+        color: #e8e8ea;
+        border: 1px solid rgba(255,255,255,0.08);
+        border-radius: 10px;
+        padding: 8px 12px;
+        font-size: 13px;
+    }
+    button {
+        background: #fff;
+        color: #0a0a0c;
+        border: none;
+        border-radius: 10px;
+        padding: 9px 16px;
+        font-size: 13px;
+        cursor: pointer;
+        font-weight: 600;
+    }
+    button:hover { background: #e2e2e4; }
+    button:disabled { background: #3a3b40; color: #7a7b80; cursor: not-allowed; }
+    button.secondary {
+        background: #202126;
+        color: #e8e8ea;
+        border: 1px solid rgba(255,255,255,0.08);
+    }
+    button.secondary:hover { background: #2a2b31; }
+
+    .hint { font-size: 11px; color: #5c5d63; margin-bottom: 16px; }
+    #summary {
+        font-size: 13px;
+        color: #b8b9be;
+        margin-bottom: 14px;
+        background: #17181c;
+        border: 1px solid rgba(255,255,255,0.06);
+        padding: 10px 16px;
+        border-radius: 12px;
+        display: inline-block;
+    }
+    .empty-state {
+        background: #17181c;
+        border: 1px solid rgba(255,255,255,0.06);
+        border-radius: 16px;
+        padding: 40px;
+        text-align: center;
+        color: #85868c;
+        font-size: 14px;
+    }
+
+    .layout {
+        display: flex;
+        gap: 16px;
+        align-items: flex-start;
+    }
+    .charts-col { width: calc(50% - 8px); flex-shrink: 0; }
+    .map-col { width: calc(50% - 8px); flex-shrink: 0; position: sticky; top: 20px; }
+
+    .chart-box {
+        background: #17181c;
+        border: 1px solid rgba(255,255,255,0.06);
+        border-radius: 16px;
+        padding: 14px 16px 10px 16px;
+        margin-bottom: 10px;
+    }
+    .chart-box h3 {
+        margin: 0 0 8px 0;
+        font-size: 12px;
+        color: #85868c;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+    }
+    .chart-box canvas { width: 100% !important; height: 340px !important; cursor: grab; }
+    .chart-box canvas.dragging { cursor: grabbing; }
+
+    .map-box {
+        background: #17181c;
+        border: 1px solid rgba(255,255,255,0.06);
+        border-radius: 16px;
+        padding: 18px;
+        height: calc(100vh - 150px);
+        min-height: 520px;
+        display: flex;
+        flex-direction: column;
+    }
+    .map-box h3 {
+        margin: 0 0 10px 0;
+        font-size: 12px;
+        color: #85868c;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+    }
+    #trackSvg { width: 100%; flex: 1; cursor: grab; touch-action: none; }
+    #trackSvg:active { cursor: grabbing; }
+    .map-legend { font-size: 11px; color: #5c5d63; display: flex; justify-content: space-between; margin-top: 10px; align-items: center; }
+    .legend-gradient {
+        height: 6px;
+        flex: 1;
+        margin: 0 10px;
+        border-radius: 3px;
+        background: linear-gradient(to right, hsl(0,80%,50%), hsl(60,80%,50%), hsl(120,80%,50%));
+    }
+    .map-empty { color: #5c5d63; font-size: 13px; text-align: center; margin-top: 40px; }
+</style>
+</head>
+<body>
+
+<h1>ACC Telemetry Dashboard</h1>
+
+<div class="controls">
+    <div>
+        <label>Сессия</label><br>
+        <select id="lapSelect"></select>
+    </div>
+    <div>
+        <label>Круг 1</label><br>
+        <select id="lapASelect"></select>
+    </div>
+    <div>
+        <label>Круг 2</label><br>
+        <select id="lapBSelect"></select>
+    </div>
+    <button id="compareBtn" onclick="loadComparison()">Сравнить</button>
+    <button class="secondary" onclick="resetAllZoom()">Сбросить вид</button>
+</div>
+
+<div class="controls" style="align-items: flex-start;">
+    <div style="flex: 1;">
+        <label>Текущий сетап машины (шины, ARB, дифф, аэро и т.д.)</label><br>
+        <textarea id="setupText" rows="3" style="width: 100%; box-sizing: border-box; background: #1c1d21; color: #e6e6e8; border: 1px solid #3a3b40; border-radius: 4px; padding: 8px; font: inherit; resize: vertical;" placeholder="Например: давление 27.5/27.0 psi, развал -3.5/-3.0, ARB 5/4, дифф 60/80..."></textarea>
+    </div>
+    <button id="analyzeBtn" onclick="loadAnalysis()" disabled>AI-анализ сетапа</button>
+</div>
+
+<div id="analysisPanel" style="display:none; white-space: pre-wrap; background: #1c1d21; border: 1px solid #3a3b40; border-radius: 4px; padding: 14px; margin-top: 10px; line-height: 1.5;"></div>
+
+<div class="hint">Зажми ЛКМ на графике или карте и таскай. Колёсико — зум к курсору. Двойной клик — сброс вида. Графики двигаются только по дистанции трассы и не уходят за пределы круга.</div>
+
+<div id="summary"></div>
+<div id="emptyState" class="empty-state" style="display:none;">Вы пока не проехали ни одного круга.</div>
+
+<div class="layout" id="mainLayout">
+    <div class="charts-col">
+        <div class="chart-box"><h3>Дельта (Круг 2 − Круг 1), сек</h3><canvas id="chartDelta"></canvas></div>
+        <div class="chart-box"><h3>Время круга</h3><canvas id="chartTime"></canvas></div>
+        <div class="chart-box"><h3>Скорость, км/ч</h3><canvas id="chartSpeed"></canvas></div>
+        <div class="chart-box"><h3>Руль, °</h3><canvas id="chartSteer"></canvas></div>
+        <div class="chart-box"><h3>Газ</h3><canvas id="chartGas"></canvas></div>
+        <div class="chart-box"><h3>Тормоз</h3><canvas id="chartBrake"></canvas></div>
+        <div class="chart-box"><h3>Температура шин, °C</h3><canvas id="chartTyre"></canvas></div>
+        <div class="chart-box"><h3>Обороты двигателя, RPM</h3><canvas id="chartRpm"></canvas></div>
+    </div>
+    <div class="map-col">
+        <div class="map-box">
+            <h3>Карта трассы</h3>
+            <svg id="trackSvg" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet"></svg>
+            <div class="map-legend">
+                <span>медленно</span>
+                <div class="legend-gradient"></div>
+                <span>быстро</span>
+            </div>
+            <div id="mapEmptyMsg" class="map-empty" style="display:none;">
+                Карта недоступна для этой сессии — запись сделана до добавления координат.
+                Обнови acc_logger.py и запиши круг заново.
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+const API = "http://127.0.0.1:8000";
+let charts = {};
+let currentData = null;
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+// ---------- Форматирование времени ----------
+
+function pad2(n) { return String(n).padStart(2, "0"); }
+function pad3(n) { return String(n).padStart(3, "0"); }
+
+function formatSessionDate(iso) {
+    const d = new Date(iso);
+    if (isNaN(d)) return iso;
+    const dd = pad2(d.getDate());
+    const mm = pad2(d.getMonth() + 1);
+    const yy = pad2(d.getFullYear() % 100);
+    const hh = pad2(d.getHours());
+    const mi = pad2(d.getMinutes());
+    const ss = pad2(d.getSeconds());
+    return `${dd}.${mm}.${yy} ${hh}:${mi}:${ss}`;
+}
+
+function formatLapTime(totalSec) {
+    const m = Math.floor(totalSec / 60);
+    const rem = totalSec - m * 60;
+    const secWhole = Math.floor(rem);
+    const ms = Math.round((rem - secWhole) * 1000);
+    return `${pad2(m)}.${pad2(secWhole)}.${pad3(ms)}`;
+}
+
+// ---------- Графики: pan/zoom только по оси X, ограниченный границами данных круга ----------
+
+function makeChart(canvasId, datasets, yLabel, xLabel) {
+    const canvas = document.getElementById(canvasId);
+    const ctx = canvas.getContext("2d");
+
+    // Точка-маркер при наведении красится в цвет своей линии (по умолчанию Chart.js
+    // берёт другой цвет для точек, если backgroundColor не задан явно)
+    datasets = datasets.map(ds => ({
+        ...ds,
+        pointBackgroundColor: ds.borderColor,
+        pointHoverBackgroundColor: ds.borderColor,
+        pointHoverBorderColor: "#fff",
+        pointHoverBorderWidth: 1.5,
+    }));
+
+    const chart = new Chart(ctx, {
+        type: "line",
+        data: { datasets },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: false,
+            parsing: false,
+            interaction: { mode: "index", intersect: false },
+            scales: {
+                x: { type: "linear", title: { display: true, text: xLabel, color: "#85868c" }, grid: { color: "#232428" }, ticks: { color: "#85868c" } },
+                y: { title: { display: true, text: yLabel, color: "#85868c" }, grid: { color: "#232428" }, ticks: { color: "#85868c" } },
+            },
+            plugins: {
+                legend: { labels: { color: "#e8e8ea", boxWidth: 12, font: { size: 11 } } },
+            },
+            elements: { point: { radius: 0, hoverRadius: 4 } },
+            onHover: (event, elements, hoveredChart) => {
+                if (elements.length > 0) {
+                    const index = elements[0].index;
+                    syncMapMarker(index);
+                    syncChartsCrosshair(index, hoveredChart);
+                } else {
+                    clearChartsCrosshair(hoveredChart);
+                }
+            },
+        },
+    });
+
+    chart._homeX = { min: chart.scales.x.min, max: chart.scales.x.max };
+    enableChartPanZoom(chart, canvas);
+    canvas.addEventListener("mouseleave", () => clearChartsCrosshair(null));
+    return chart;
+}
+
+// Ставит точки-маркеры на всех графиках, кроме того, на котором сейчас реальный hover
+// (у него точка уже показана нативным hover-состоянием Chart.js)
+function syncChartsCrosshair(index, sourceChart) {
+    Object.values(charts).forEach(chart => {
+        if (chart === sourceChart) return;
+        const active = chart.data.datasets.map((_, datasetIndex) => ({ datasetIndex, index }));
+        chart.setActiveElements(active);
+        chart.update("none");
+    });
+}
+
+// Убирает точки-маркеры со всех графиков (кроме sourceChart, если передан) — вызывается,
+// когда курсор уходит с графика/канваса
+function clearChartsCrosshair(sourceChart) {
+    Object.values(charts).forEach(chart => {
+        if (chart === sourceChart) return;
+        chart.setActiveElements([]);
+        chart.update("none");
+    });
+}
+
+function clampRange(min, max, homeMin, homeMax) {
+    const width = max - min;
+    const homeWidth = homeMax - homeMin;
+    if (width >= homeWidth) {
+        return { min: homeMin, max: homeMax };
+    }
+    if (min < homeMin) { max += (homeMin - min); min = homeMin; }
+    if (max > homeMax) { min -= (max - homeMax); max = homeMax; }
+    return { min, max };
+}
+
+function enableChartPanZoom(chart, canvas) {
+    let isDown = false;
+    let startClientX;
+    let startRange;
+
+    canvas.addEventListener("mousedown", (e) => {
+        isDown = true;
+        canvas.classList.add("dragging");
+        startClientX = e.clientX;
+        startRange = { min: chart.scales.x.min, max: chart.scales.x.max };
+    });
+
+    window.addEventListener("mousemove", (e) => {
+        if (!isDown) return;
+        const area = chart.chartArea;
+        const areaW = area.right - area.left;
+        const dxPix = e.clientX - startClientX;
+        const xRange = startRange.max - startRange.min;
+        const dataDx = dxPix / areaW * xRange;
+
+        const clamped = clampRange(
+            startRange.min - dataDx,
+            startRange.max - dataDx,
+            chart._homeX.min, chart._homeX.max
+        );
+        chart.options.scales.x.min = clamped.min;
+        chart.options.scales.x.max = clamped.max;
+        chart.update("none");
+    });
+
+    window.addEventListener("mouseup", () => {
+        isDown = false;
+        canvas.classList.remove("dragging");
+    });
+
+    canvas.addEventListener("wheel", (e) => {
+        e.preventDefault();
+        const rect = canvas.getBoundingClientRect();
+        const area = chart.chartArea;
+        const pixelX = e.clientX - rect.left;
+
+        const xMin = chart.scales.x.min, xMax = chart.scales.x.max;
+        const valX = xMin + (pixelX - area.left) / (area.right - area.left) * (xMax - xMin);
+
+        const factor = e.deltaY > 0 ? 1.15 : 1 / 1.15;
+        const newMin = valX - (valX - xMin) * factor;
+        const newMax = valX + (xMax - valX) * factor;
+
+        const clamped = clampRange(newMin, newMax, chart._homeX.min, chart._homeX.max);
+        chart.options.scales.x.min = clamped.min;
+        chart.options.scales.x.max = clamped.max;
+        chart.update("none");
+    }, { passive: false });
+
+    canvas.addEventListener("dblclick", () => {
+        chart.options.scales.x.min = chart._homeX.min;
+        chart.options.scales.x.max = chart._homeX.max;
+        chart.update("none");
+    });
+}
+
+function resetAllZoom() {
+    Object.values(charts).forEach(chart => {
+        chart.options.scales.x.min = chart._homeX.min;
+        chart.options.scales.x.max = chart._homeX.max;
+        chart.update("none");
+    });
+    resetMapView();
+}
+
+function toPoints(xs, ys) {
+    return xs.map((x, i) => ({ x, y: ys[i] }));
+}
+
+async function loadLaps() {
+    const res = await fetch(`${API}/laps`);
+    const laps = await res.json();
+    const select = document.getElementById("lapSelect");
+    select.innerHTML = laps.map(l => `<option value="${l.id}">${l.track} / ${l.car} — ${formatSessionDate(l.created_at)}</option>`).join("");
+    select.onchange = loadSplits;
+    if (laps.length) loadSplits();
+}
+
+async function loadSplits() {
+    const lapId = document.getElementById("lapSelect").value;
+    const res = await fetch(`${API}/laps/${lapId}/splits`);
+    const splits = await res.json();
+
+    const compareBtn = document.getElementById("compareBtn");
+    const emptyState = document.getElementById("emptyState");
+    const mainLayout = document.getElementById("mainLayout");
+
+    if (splits.length === 0) {
+        document.getElementById("lapASelect").innerHTML = "";
+        document.getElementById("lapBSelect").innerHTML = "";
+        compareBtn.disabled = true;
+        emptyState.style.display = "block";
+        mainLayout.style.display = "none";
+        document.getElementById("summary").innerText = "";
+        return;
+    }
+
+    emptyState.style.display = "none";
+    mainLayout.style.display = "flex";
+    compareBtn.disabled = false;
+
+    const optionsHtml = splits.map(s => `<option value="${s.lap_number}">Круг ${s.lap_number} (${formatLapTime(s.duration_sec)})</option>`).join("");
+    document.getElementById("lapASelect").innerHTML = optionsHtml;
+    document.getElementById("lapBSelect").innerHTML = optionsHtml;
+}
+
+// ---------- Карта трассы: своя реализация зума/пана на viewBox ----------
+
+let mapView = { x: 0, y: 0, w: 100, h: 100 };
+let mapBaseView = { x: 0, y: 0, w: 100, h: 100 };
+
+function applyMapView() {
+    const svg = document.getElementById("trackSvg");
+    svg.setAttribute("viewBox", `${mapView.x} ${mapView.y} ${mapView.w} ${mapView.h}`);
+}
+
+function resetMapView() {
+    mapView = { ...mapBaseView };
+    applyMapView();
+}
+
+function setupMapZoomPan() {
+    const svg = document.getElementById("trackSvg");
+    if (svg.dataset.zoomEnabled) return;
+    svg.dataset.zoomEnabled = "1";
+
+    svg.addEventListener("wheel", (e) => {
+        e.preventDefault();
+        const rect = svg.getBoundingClientRect();
+        const mx = mapView.x + (e.clientX - rect.left) / rect.width * mapView.w;
+        const my = mapView.y + (e.clientY - rect.top) / rect.height * mapView.h;
+
+        const factor = e.deltaY > 0 ? 1.15 : 1 / 1.15;
+        mapView.x = mx - (mx - mapView.x) * factor;
+        mapView.y = my - (my - mapView.y) * factor;
+        mapView.w *= factor;
+        mapView.h *= factor;
+        applyMapView();
+    }, { passive: false });
+
+    let isDown = false, startClientX, startClientY, startView;
+    svg.addEventListener("mousedown", (e) => {
+        isDown = true;
+        startClientX = e.clientX;
+        startClientY = e.clientY;
+        startView = { ...mapView };
+    });
+    window.addEventListener("mousemove", (e) => {
+        if (!isDown) return;
+        const rect = svg.getBoundingClientRect();
+        const dx = (e.clientX - startClientX) / rect.width * startView.w;
+        const dy = (e.clientY - startClientY) / rect.height * startView.h;
+        mapView.x = startView.x - dx;
+        mapView.y = startView.y - dy;
+        applyMapView();
+    });
+    window.addEventListener("mouseup", () => { isDown = false; });
+
+    svg.addEventListener("dblclick", () => resetMapView());
+}
+
+function speedToColor(speed, minSpeed, maxSpeed) {
+    const t = maxSpeed > minSpeed ? (speed - minSpeed) / (maxSpeed - minSpeed) : 0.5;
+    const hue = Math.max(0, Math.min(1, t)) * 120;
+    return `hsl(${hue}, 80%, 50%)`;
+}
+
+function drawTrackMap(data) {
+    const svg = document.getElementById("trackSvg");
+    const emptyMsg = document.getElementById("mapEmptyMsg");
+    svg.innerHTML = "";
+
+    const hasA = Array.isArray(data.lap_a.car_x);
+    const hasB = Array.isArray(data.lap_b.car_x);
+
+    if (!hasA && !hasB) {
+        svg.style.display = "none";
+        emptyMsg.style.display = "block";
+        return;
+    }
+    svg.style.display = "block";
+    emptyMsg.style.display = "none";
+
+    const allX = [...(hasA ? data.lap_a.car_x : []), ...(hasB ? data.lap_b.car_x : [])];
+    const allZ = [...(hasA ? data.lap_a.car_z : []), ...(hasB ? data.lap_b.car_z : [])];
+    const minX = Math.min(...allX), maxX = Math.max(...allX);
+    const minZ = Math.min(...allZ), maxZ = Math.max(...allZ);
+    const padX = (maxX - minX) * 0.06 || 10;
+    const padZ = (maxZ - minZ) * 0.06 || 10;
+
+    mapBaseView = { x: minX - padX, y: minZ - padZ, w: maxX - minX + 2 * padX, h: maxZ - minZ + 2 * padZ };
+    mapView = { ...mapBaseView };
+    applyMapView();
+    setupMapZoomPan();
+
+    const roadLap = hasA ? { x: data.lap_a.car_x, z: data.lap_a.car_z } : { x: data.lap_b.car_x, z: data.lap_b.car_z };
+    const roadPoints = roadLap.x.map((x, i) => `${x},${roadLap.z[i]}`).join(" ");
+
+    const road = document.createElementNS(SVG_NS, "polyline");
+    road.setAttribute("points", roadPoints);
+    road.setAttribute("fill", "none");
+    road.setAttribute("stroke", "#3a3d44");
+    road.setAttribute("stroke-width", 13);
+    road.setAttribute("stroke-linecap", "round");
+    road.setAttribute("stroke-linejoin", "round");
+    svg.appendChild(road);
+
+    const centerline = document.createElementNS(SVG_NS, "polyline");
+    centerline.setAttribute("points", roadPoints);
+    centerline.setAttribute("fill", "none");
+    centerline.setAttribute("stroke", "#55585f");
+    centerline.setAttribute("stroke-width", 0.6);
+    centerline.setAttribute("stroke-dasharray", "4 4");
+    svg.appendChild(centerline);
+
+    function drawLapTrajectory(carX, carZ, speed) {
+        const minSpeed = Math.min(...speed), maxSpeed = Math.max(...speed);
+        for (let i = 0; i < carX.length - 1; i++) {
+            const line = document.createElementNS(SVG_NS, "line");
+            line.setAttribute("x1", carX[i]);
+            line.setAttribute("y1", carZ[i]);
+            line.setAttribute("x2", carX[i + 1]);
+            line.setAttribute("y2", carZ[i + 1]);
+            line.setAttribute("stroke", speedToColor(speed[i], minSpeed, maxSpeed));
+            line.setAttribute("stroke-width", 2.2);
+            line.setAttribute("stroke-linecap", "round");
+            svg.appendChild(line);
+        }
+    }
+
+    if (hasA) drawLapTrajectory(data.lap_a.car_x, data.lap_a.car_z, data.lap_a.speed);
+    if (hasB) drawLapTrajectory(data.lap_b.car_x, data.lap_b.car_z, data.lap_b.speed);
+
+    if (hasA) {
+        const m = document.createElementNS(SVG_NS, "circle");
+        m.setAttribute("id", "markerA");
+        m.setAttribute("r", 3.2);
+        m.setAttribute("fill", "#4c8bf5");
+        m.setAttribute("stroke", "#fff");
+        m.setAttribute("stroke-width", 0.8);
+        m.setAttribute("visibility", "hidden");
+        svg.appendChild(m);
+    }
+    if (hasB) {
+        const m = document.createElementNS(SVG_NS, "circle");
+        m.setAttribute("id", "markerB");
+        m.setAttribute("r", 3.2);
+        m.setAttribute("fill", "#f5a04c");
+        m.setAttribute("stroke", "#fff");
+        m.setAttribute("stroke-width", 0.8);
+        m.setAttribute("visibility", "hidden");
+        svg.appendChild(m);
+    }
+}
+
+function syncMapMarker(index) {
+    if (!currentData) return;
+    const markerA = document.getElementById("markerA");
+    const markerB = document.getElementById("markerB");
+
+    if (markerA && Array.isArray(currentData.lap_a.car_x)) {
+        markerA.setAttribute("cx", currentData.lap_a.car_x[index]);
+        markerA.setAttribute("cy", currentData.lap_a.car_z[index]);
+        markerA.setAttribute("visibility", "visible");
+    }
+    if (markerB && Array.isArray(currentData.lap_b.car_x)) {
+        markerB.setAttribute("cx", currentData.lap_b.car_x[index]);
+        markerB.setAttribute("cy", currentData.lap_b.car_z[index]);
+        markerB.setAttribute("visibility", "visible");
+    }
+}
+
+// ---------- Загрузка и построение графиков ----------
+
+async function loadComparison() {
+    const lapId = document.getElementById("lapSelect").value;
+    const lapA = document.getElementById("lapASelect").value;
+    const lapB = document.getElementById("lapBSelect").value;
+
+    const res = await fetch(`${API}/compare?lap_id=${lapId}&lap_a=${lapA}&lap_b=${lapB}`);
+    if (!res.ok) {
+        alert("Ошибка: " + (await res.json()).detail);
+        return;
+    }
+    const data = await res.json();
+    currentData = data;
+    document.getElementById("analyzeBtn").disabled = false;
+    document.getElementById("analysisPanel").style.display = "none";
+
+    const xs = data.lap_a.distance_m || data.track_position;
+    const xLabel = data.lap_a.distance_m ? "Дистанция, м" : "Позиция на круге (0-1)";
+
+    document.getElementById("summary").innerText =
+        `Круг 1: ${formatLapTime(data.lap_a.total_time)}   |   ` +
+        `Круг 2: ${formatLapTime(data.lap_b.total_time)}   |   ` +
+        `Разница: ${(data.lap_b.total_time - data.lap_a.total_time).toFixed(3)} сек`;
+
+    Object.values(charts).forEach(c => c.destroy());
+
+    charts.delta = makeChart("chartDelta", [
+        { label: "Дельта (2 − 1)", data: toPoints(xs, data.delta), borderColor: "#f54c4c", borderWidth: 1.5 },
+    ], "сек", xLabel);
+
+    charts.time = makeChart("chartTime", [
+        { label: "Круг 1", data: toPoints(xs, data.lap_a.time), borderColor: "#4c8bf5", borderWidth: 1.5 },
+        { label: "Круг 2", data: toPoints(xs, data.lap_b.time), borderColor: "#f5a04c", borderWidth: 1.5 },
+    ], "сек", xLabel);
+
+    charts.speed = makeChart("chartSpeed", [
+        { label: "Круг 1", data: toPoints(xs, data.lap_a.speed), borderColor: "#4c8bf5", borderWidth: 1.5 },
+        { label: "Круг 2", data: toPoints(xs, data.lap_b.speed), borderColor: "#f5a04c", borderWidth: 1.5 },
+    ], "км/ч", xLabel);
+
+    charts.steer = makeChart("chartSteer", [
+        { label: "Круг 1", data: toPoints(xs, data.lap_a.steer), borderColor: "#4c8bf5", borderWidth: 1.5 },
+        { label: "Круг 2", data: toPoints(xs, data.lap_b.steer), borderColor: "#f5a04c", borderWidth: 1.5 },
+    ], "градусы", xLabel);
+
+    charts.gas = makeChart("chartGas", [
+        { label: "Круг 1", data: toPoints(xs, data.lap_a.gas), borderColor: "#4c8bf5", borderWidth: 1.5 },
+        { label: "Круг 2", data: toPoints(xs, data.lap_b.gas), borderColor: "#f5a04c", borderWidth: 1.5 },
+    ], "0-1", xLabel);
+
+    charts.brake = makeChart("chartBrake", [
+        { label: "Круг 1", data: toPoints(xs, data.lap_a.brake), borderColor: "#4c8bf5", borderWidth: 1.5 },
+        { label: "Круг 2", data: toPoints(xs, data.lap_b.brake), borderColor: "#f5a04c", borderWidth: 1.5 },
+    ], "0-1", xLabel);
+
+    // Температура шин: 4 колеса x 2 круга. Цвет = колесо, сплошная/пунктир = какой круг
+    charts.tyre = makeChart("chartTyre", [
+        { label: "Круг 1 FL", data: toPoints(xs, data.lap_a.tyre_fl), borderColor: "#4c8bf5", borderWidth: 1.3 },
+        { label: "Круг 1 FR", data: toPoints(xs, data.lap_a.tyre_fr), borderColor: "#4cd9f5", borderWidth: 1.3 },
+        { label: "Круг 1 RL", data: toPoints(xs, data.lap_a.tyre_rl), borderColor: "#4cf58a", borderWidth: 1.3 },
+        { label: "Круг 1 RR", data: toPoints(xs, data.lap_a.tyre_rr), borderColor: "#a8f54c", borderWidth: 1.3 },
+        { label: "Круг 2 FL", data: toPoints(xs, data.lap_b.tyre_fl), borderColor: "#f5a04c", borderWidth: 1.3, borderDash: [5, 3] },
+        { label: "Круг 2 FR", data: toPoints(xs, data.lap_b.tyre_fr), borderColor: "#f5cf4c", borderWidth: 1.3, borderDash: [5, 3] },
+        { label: "Круг 2 RL", data: toPoints(xs, data.lap_b.tyre_rl), borderColor: "#f54c8a", borderWidth: 1.3, borderDash: [5, 3] },
+        { label: "Круг 2 RR", data: toPoints(xs, data.lap_b.tyre_rr), borderColor: "#c04cf5", borderWidth: 1.3, borderDash: [5, 3] },
+    ], "°C", xLabel);
+
+    charts.rpm = makeChart("chartRpm", [
+        { label: "Круг 1", data: toPoints(xs, data.lap_a.rpm), borderColor: "#4c8bf5", borderWidth: 1.5 },
+        { label: "Круг 2", data: toPoints(xs, data.lap_b.rpm), borderColor: "#f5a04c", borderWidth: 1.5 },
+    ], "RPM", xLabel);
+
+    drawTrackMap(data);
+}
+
+async function loadAnalysis() {
+    const lapId = document.getElementById("lapSelect").value;
+    const lapA = document.getElementById("lapASelect").value;
+    const lapB = document.getElementById("lapBSelect").value;
+    const setupText = document.getElementById("setupText").value;
+
+    const btn = document.getElementById("analyzeBtn");
+    const panel = document.getElementById("analysisPanel");
+    btn.disabled = true;
+    btn.textContent = "Анализирую...";
+    panel.style.display = "block";
+    panel.textContent = "Claude анализирует круг, это может занять до полуминуты...";
+
+    try {
+        const res = await fetch(`${API}/analyze`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ lap_id: Number(lapId), lap_a: Number(lapA), lap_b: Number(lapB), setup_text: setupText }),
+        });
+        if (!res.ok) {
+            panel.textContent = "Ошибка: " + (await res.json()).detail;
+            return;
+        }
+        const data = await res.json();
+        panel.textContent = data.analysis;
+    } catch (err) {
+        panel.textContent = "Не удалось связаться с сервером: " + err.message;
+    } finally {
+        btn.disabled = false;
+        btn.textContent = "AI-анализ сетапа";
+    }
+}
+
+loadLaps();
+</script>
+
+</body>
+</html>
